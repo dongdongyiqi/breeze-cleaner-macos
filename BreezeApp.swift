@@ -1,8 +1,15 @@
 import Cocoa
 import SwiftUI
 
+struct ProcItem: Identifiable {
+    let id: pid_t
+    let name: String
+    let icon: NSImage
+    let runningApp: NSRunningApplication?
+}
+
 class BreezeMonitor: ObservableObject {
-    @Published var detectedApps: [NSRunningApplication] = []
+    @Published var detectedProcs: [ProcItem] = []
     @Published var whitelist: Set<String> = []
     @Published var isScanning: Bool = true
     
@@ -13,149 +20,132 @@ class BreezeMonitor: ObservableObject {
         if let saved = UserDefaults.standard.stringArray(forKey: whitelistKey) {
             whitelist = Set(saved)
         }
-        whitelist.insert("Terminal")
-        whitelist.insert("Finder")
+        ["Terminal", "Finder", "BreezeSystem"].forEach { whitelist.insert($0) }
         scanProcesses()
-        startRadar()
-    }
-    
-    func startRadar() {
-        timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
-            guard self.isScanning else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: 3.0, repeats: true) { [weak self] _ in
+            guard let self = self, self.isScanning else { return }
             self.scanProcesses()
         }
     }
     
     func scanProcesses() {
-        let runningApps = NSWorkspace.shared.runningApplications
-        let myBundleID = Bundle.main.bundleIdentifier
+        var list: [ProcItem] = []
+        var seenPids = Set<pid_t>()
+        let myPid = getpid()
         
-        let targets = runningApps.filter { app in
+        // 1. 扫描常规图形界面 App
+        for app in NSWorkspace.shared.runningApplications {
             guard app.activationPolicy == .regular,
-                  app.bundleIdentifier != myBundleID,
+                  app.processIdentifier != myPid,
                   let name = app.localizedName,
-                  let path = app.bundleURL?.path else { return false }
+                  let path = app.bundleURL?.path,
+                  !path.hasPrefix("/System/"),
+                  !whitelist.contains(name) else { continue }
             
-            if path.hasPrefix("/System/") { return false }
-            if whitelist.contains(name) { return false }
-            return true
+            seenPids.insert(app.processIdentifier)
+            list.append(ProcItem(
+                id: app.processIdentifier,
+                name: name,
+                icon: app.icon ?? NSWorkspace.shared.icon(forFile: path),
+                runningApp: app
+            ))
         }
         
-        DispatchQueue.main.async {
-            self.detectedApps = targets
+        // 2. 扫描用户目录下的命令行后台进程（如《清风系统1》）
+        let task = Process()
+        task.launchPath = "/bin/ps"
+        task.arguments = ["-eo", "pid,comm"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        if (try? task.run()) != nil {
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8) {
+                for line in output.components(separatedBy: "\n") {
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    let parts = trimmed.split(separator: " ", maxSplits: 1)
+                    if parts.count == 2, let pid = pid_t(parts[0]), pid != myPid, !seenPids.contains(pid) {
+                        let path = String(parts[1])
+                        let name = URL(fileURLWithPath: path).lastPathComponent
+                        // 仅捕获用户目录下非系统核心的自定义运行程序
+                        if path.hasPrefix("/Users/") && !path.contains(".app/") && !whitelist.contains(name) {
+                            let defaultIcon = NSImage(systemSymbolName: "terminal.fill", accessibilityDescription: nil) ?? NSImage()
+                            list.append(ProcItem(id: pid, name: "\(name) (后台进程)", icon: defaultIcon, runningApp: nil))
+                        }
+                    }
+                }
+            }
         }
+        
+        DispatchQueue.main.async { self.detectedProcs = list }
     }
     
-    func killApp(_ app: NSRunningApplication) {
-        app.forceTerminate()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.scanProcesses()
+    func killProc(_ item: ProcItem) {
+        if let app = item.runningApp {
+            app.forceTerminate()
+        } else {
+            kill(item.id, SIGKILL)
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self.scanProcesses() }
     }
     
-    func allowAndRemember(_ app: NSRunningApplication) {
-        if let name = app.localizedName {
-            whitelist.insert(name)
-            UserDefaults.standard.set(Array(whitelist), forKey: whitelistKey)
-            scanProcesses()
-        }
+    func allowAndRemember(_ item: ProcItem) {
+        let cleanName = item.name.replacingOccurrences(of: " (后台进程)", with: "")
+        whitelist.insert(cleanName)
+        UserDefaults.standard.set(Array(whitelist), forKey: whitelistKey)
+        scanProcesses()
     }
 }
 
 struct ContentView: View {
     @ObservedObject var monitor: BreezeMonitor
-    
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("🍃 清风系统 v2.0")
-                    .font(.headline)
+                Text("🍃 清风系统 v2.1").font(.headline)
                 Spacer()
-                Toggle("巡检", isOn: $monitor.isScanning)
-                    .toggleStyle(.switch)
-                    .labelsHidden()
+                Toggle("巡检", isOn: $monitor.isScanning).toggleStyle(.switch).labelsHidden()
             }
-            
             Divider()
-            
-            if monitor.detectedApps.isEmpty {
-                Text("系统非常清爽，暂无多余软件")
-                    .foregroundColor(.secondary)
-                    .padding(.vertical, 8)
+            if monitor.detectedProcs.isEmpty {
+                Text("系统非常清爽，暂无多余软件").foregroundColor(.secondary).padding(.vertical, 8)
             } else {
-                Text("检测到以下活动软件：")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                ForEach(monitor.detectedApps, id: \.processIdentifier) { app in
+                Text("检测到以下活动软件与后台进程：").font(.caption).foregroundColor(.secondary)
+                ForEach(monitor.detectedProcs) { item in
                     HStack {
-                        if let icon = app.icon {
-                            Image(nsImage: icon)
-                                .resizable()
-                                .frame(width: 18, height: 18)
-                        }
-                        Text(app.localizedName ?? "未知应用")
-                            .lineLimit(1)
+                        Image(nsImage: item.icon).resizable().frame(width: 18, height: 18)
+                        Text(item.name).lineLimit(1)
                         Spacer()
-                        Button("放行") {
-                            monitor.allowAndRemember(app)
-                        }
-                        Button("清理") {
-                            monitor.killApp(app)
-                        }
+                        Button("放行") { monitor.allowAndRemember(item) }
+                        Button("清理") { monitor.killProc(item) }.foregroundColor(.red)
                     }
                 }
             }
-            
             Divider()
-            
             HStack {
-                Text("已记住白名单: \(monitor.whitelist.count) 个")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Text("已记住白名单: \(monitor.whitelist.count) 个").font(.caption).foregroundColor(.secondary)
                 Spacer()
-                Button("退出系统") {
-                    NSApplication.shared.terminate(nil)
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.secondary)
+                Button("退出系统") { NSApplication.shared.terminate(nil) }.buttonStyle(.plain).foregroundColor(.secondary)
             }
-        }
-        .padding()
-        .frame(width: 320)
+        }.padding().frame(width: 340)
     }
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
-    var statusItem: NSStatusItem!
-    var popover: NSPopover!
-    var monitor = BreezeMonitor()
-    
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    var statusItem: NSStatusItem!; var popover: NSPopover!; var monitor = BreezeMonitor()
+    func applicationDidFinishLaunching(_ n: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            button.title = "🍃"
-            button.action = #selector(togglePopover(_:))
-        }
-        
+        statusItem.button?.title = "🍃"
+        statusItem.button?.action = #selector(togglePopover(_:))
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 320, height: 260)
+        popover.contentSize = NSSize(width: 340, height: 260)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(rootView: ContentView(monitor: monitor))
     }
-    
     @objc func togglePopover(_ sender: AnyObject?) {
-        if let button = statusItem.button {
-            if popover.isShown {
-                popover.performClose(sender)
-            } else {
-                popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            }
-        }
+        guard let btn = statusItem.button else { return }
+        if popover.isShown { popover.performClose(sender) }
+        else { monitor.scanProcesses(); popover.show(relativeTo: btn.bounds, of: btn, preferredEdge: .minY) }
     }
 }
 
-let app = NSApplication.shared
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
+let app = NSApplication.shared; let del = AppDelegate(); app.delegate = del; app.run()
