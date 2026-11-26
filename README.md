@@ -1,3 +1,7 @@
+![Platform](https://shields.io)
+![Language](https://shields.io)
+![Version](https://shields.io)
+![License](https://shields.io)
 # 清风系统 (Breeze System for macOS)
 
 一款轻量级的 macOS 后台进程巡检与交互式清理守护工具，使用原生 C++ 编写，无需任何第三方依赖，帮助你保持系统清爽、拦截多余后台驻留软件。
