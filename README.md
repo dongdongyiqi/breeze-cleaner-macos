@@ -1,4 +1,8 @@
 # 清风系统 (Breeze System for macOS)
+[![Release](https://img.shields.io/github/v/release/dongdongyiqi/breeze-cleaner-macos?color=brightgreen&label=最新版本)](https://github.com/dongdongyiqi/breeze-cleaner-macos/releases)
+[![Platform](https://img.shields.io/badge/平台-macOS-blue)](#)
+[![Language](https://img.shields.io/badge/语言-C%2B%2B-orange)](#)
+[![License](https://img.shields.io/badge/协议-MIT-purple)](#)
 
 一款轻量级的 macOS 后台进程巡检与交互式清理守护工具，使用原生 C++ 编写，无需任何第三方依赖，帮助你保持系统清爽、拦截多余后台驻留软件。
 
@@ -65,8 +69,3 @@ std::unordered_set<std::string> WHITELIST = {
 ## 📄 开源协议 (License)
 
 本项目基于 [MIT License](LICENSE) 开源。
-
-[![Release](https://img.shields.io/github/v/release/dongdongyiqi/breeze-cleaner-macos?color=brightgreen&label=最新版本)](https://github.com/dongdongyiqi/breeze-cleaner-macos/releases)
-[![Platform](https://img.shields.io/badge/平台-macOS-blue)](#)
-[![Language](https://img.shields.io/badge/语言-C%2B%2B-orange)](#)
-[![License](https://img.shields.io/badge/协议-MIT-purple)](#)
