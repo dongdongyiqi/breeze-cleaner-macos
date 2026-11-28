@@ -65,3 +65,8 @@ std::unordered_set<std::string> WHITELIST = {
 ## 📄 开源协议 (License)
 
 本项目基于 [MIT License](LICENSE) 开源。
+
+[![Release](https://img.shields.io/github/v/release/dongdongyiqi/breeze-cleaner-macos?color=brightgreen&label=最新版本)](https://github.com/dongdongyiqi/breeze-cleaner-macos/releases)
+[![Platform](https://img.shields.io/badge/平台-macOS-blue)](#)
+[![Language](https://img.shields.io/badge/语言-C%2B%2B-orange)](#)
+[![License](https://img.shields.io/badge/协议-MIT-purple)](#)
